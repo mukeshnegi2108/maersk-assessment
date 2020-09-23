@@ -1,0 +1,62 @@
+trigger:
+  - master
+
+
+variables:
+  # Container registry service connection established during pipeline creation
+  dockerRegistryServiceConnection: <<<ACR subscription details>>>
+  imageRepository: 'aksworkshop'
+  containerRegistry: 'msworkshops.azurecr.io'
+  dockerfilePath: '$(Build.SourcesDirectory)/Dockerfile'
+  tag: '$(Build.BuildNumber)'
+  sourceVersion: '$(Build.SourceVersion)'
+  sourceBranch: '$(Build.SourceBranchName)'
+  
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build and push stage
+  jobs:  
+  - job: Build
+    displayName: Build job
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - script: sed -i 's/#BUILD_ID#/$(tag)/g' _includes/nav.html
+      displayName: Update site with Build ID
+
+    - script: |
+          SHORTCOMMITID=$(echo $(sourceVersion) | cut -c1-7)  
+          sed -i "s/#COMMIT_ID#/$SHORTCOMMITID/g" _includes/nav.html
+      displayName: Update site with Commit ID
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: $(imageRepository)
+        dockerfile: $(dockerfilePath)
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: |
+          $(tag)
+- stage: Deploy
+  displayName: Deploy to slot
+  jobs:
+  - job: Deploy
+    displayName: Deploy job
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: AzureRmWebAppDeployment@4
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: 'AKS Workshop'
+        appType: 'webAppContainer'
+        WebAppName: 'aksworkshop'
+        deployToSlotOrASE: true
+        ResourceGroupName: 'workshops'
+        SlotName: '$(sourceBranch)'
+        DockerNamespace: '$(containerRegistry)'
+        DockerRepository: '$(imageRepository)'
+        DockerImageTag: '$(tag)'
